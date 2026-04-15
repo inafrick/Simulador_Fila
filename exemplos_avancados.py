@@ -3,6 +3,8 @@ Exemplos Avançados de Uso do Simulador de Rede de Filas
 Demonstra diferentes configurações e topologias
 """
 
+import sys
+
 from simulador import SimuladorRede
 
 
@@ -204,25 +206,21 @@ def exemplo_impacto_servidores():
         print(f"  % Tempo Ocioso: {fila.tempo_no_estado[0] / rede.tempo_atual * 100:.2f}%")
 
 
-def exemplo_validacao_tandem_100k_aleatorios():
-    """Validação solicitada: tandem G/G/2/3 -> G/G/1/5 com 100.000 aleatórios."""
+def exemplo_professor_itens_2_e_3():
+    """Exemplo dedicado para os itens 2 e 3 da validação."""
     print("\n" + "="*70)
-    print("EXEMPLO 8: Validação Tandem com 100.000 Aleatórios")
+    print("EXEMPLO PROFESSOR: ITENS 2 E 3")
     print("="*70)
+    print("2. G/G/2/3, chegadas entre 1..4, atendimento entre 3..4")
+    print("3. G/G/1/5, atendimento entre 2..3 (sem chegadas externas)")
 
     rede = SimuladorRede()
-
-    # Fila 1: G/G/2/3 com chegada externa entre 1 e 4.
     rede.adicionar_fila("Fila1", servidores=2, capacidade=3,
                        tempo_chegada_min=1.0, tempo_chegada_max=4.0,
                        tempo_atendimento_min=3.0, tempo_atendimento_max=4.0)
-
-    # Fila 2: G/G/1/5 sem chegada externa (apenas fluxo interno da Fila1).
     rede.adicionar_fila("Fila2", servidores=1, capacidade=5,
                        tempo_chegada_min=-1, tempo_chegada_max=-1,
                        tempo_atendimento_min=2.0, tempo_atendimento_max=3.0)
-
-    # Tandem: 100% dos clientes que saem da Fila1 seguem para a Fila2.
     rede.adicionar_rota("Fila1", "Fila2", 1.0)
 
     rede.executar(
@@ -230,12 +228,93 @@ def exemplo_validacao_tandem_100k_aleatorios():
         max_aleatorios=100000,
         tempo_primeira_chegada=1.5,
     )
-    rede.imprimir_relatorio(
-        "VALIDACAO: Fila1 G/G/2/3 -> Fila2 G/G/1/5 (100.000 aleatorios)"
+
+    rede.imprimir_relatorio("RESULTADO DOS ITENS 2 E 3 (100.000 ALEATORIOS)")
+
+    print("Resumo objetivo para entrega:")
+    print(f"  Tempo global da simulacao: {rede.tempo_atual:.4f} minutos")
+    print(f"  Aleatorios consumidos: {rede.gerador.aleatorios_consumidos}")
+    print(f"  Perdas Fila1 (item 2): {rede.filas['Fila1'].total_clientes_perdidos}")
+    print(f"  Perdas Fila2 (item 3): {rede.filas['Fila2'].total_clientes_perdidos}")
+
+
+def _executar_cenario_itens_2_e_3():
+    """Executa o cenario base usado nos itens 2 e 3 e retorna a rede simulada."""
+    rede = SimuladorRede()
+    rede.adicionar_fila("Fila1", servidores=2, capacidade=3,
+                       tempo_chegada_min=1.0, tempo_chegada_max=4.0,
+                       tempo_atendimento_min=3.0, tempo_atendimento_max=4.0)
+    rede.adicionar_fila("Fila2", servidores=1, capacidade=5,
+                       tempo_chegada_min=-1, tempo_chegada_max=-1,
+                       tempo_atendimento_min=2.0, tempo_atendimento_max=3.0)
+    rede.adicionar_rota("Fila1", "Fila2", 1.0)
+
+    rede.executar(
+        tempo_simulacao=10**9,
+        max_aleatorios=100000,
+        tempo_primeira_chegada=1.5,
+    )
+    return rede
+
+
+def _imprimir_somente_fila(rede: SimuladorRede, nome_fila: str, titulo: str):
+    """Imprime apenas os dados da fila solicitada para facilitar preenchimento."""
+    fila = rede.filas[nome_fila]
+
+    print("\n" + "=" * 70)
+    print(f"  {titulo}")
+    print("=" * 70)
+    print(f"  Tempo Global da Simulacao: {rede.tempo_atual:.4f} minutos")
+    print(f"  Numeros Aleatorios Consumidos: {rede.gerador.aleatorios_consumidos}")
+    print("=" * 70)
+    print(f"  FILA: {nome_fila}")
+    print(f"  Servidores: {fila.num_servidores}, Capacidade: {fila.capacidade}")
+    print(f"  {'-' * 70}")
+    print(f"    Clientes Processados: {fila.total_clientes_processados}")
+    print(f"    Clientes Perdidos: {fila.total_clientes_perdidos}")
+
+    print(f"\n    {'Estado':<10} {'Tempo (min)':>14} {'Probabilidade':>14}")
+    print(f"    {'-' * 10} {'-' * 14} {'-' * 14}")
+    for i in range(fila.capacidade + 1):
+        tempo_estado = fila.tempo_no_estado[i]
+        prob = (tempo_estado / rede.tempo_atual * 100) if rede.tempo_atual > 0 else 0
+        print(f"    {i:<10} {tempo_estado:>14.4f} {prob:>13.2f}%")
+    print("=" * 70)
+
+
+def exemplo_para_fila_3_4():
+    """Campo do professor: G/G/2/3 com atendimento entre 3..4 (Fila1)."""
+    rede = _executar_cenario_itens_2_e_3()
+    _imprimir_somente_fila(
+        rede,
+        "Fila1",
+        "ITEM 2: G/G/2/3, chegadas 1..4, atendimento 3..4",
+    )
+
+
+def exemplo_para_fila_2_3():
+    """Campo do professor: G/G/1/5 com atendimento entre 2..3 (Fila2)."""
+    rede = _executar_cenario_itens_2_e_3()
+    _imprimir_somente_fila(
+        rede,
+        "Fila2",
+        "ITEM 3: G/G/1/5, atendimento 2..3 (sem chegadas externas)",
     )
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1].lower() in {"professor", "itens23", "validacao"}:
+        exemplo_professor_itens_2_e_3()
+        raise SystemExit(0)
+
+    if len(sys.argv) > 1 and sys.argv[1].lower() in {"fila_3_4", "item2", "exemplo_para_fila_3_4"}:
+        exemplo_para_fila_3_4()
+        raise SystemExit(0)
+
+    if len(sys.argv) > 1 and sys.argv[1].lower() in {"fila_2_3", "item3", "exemplo_para_fila_2_3"}:
+        exemplo_para_fila_2_3()
+        raise SystemExit(0)
+
     print("\n" + "="*70)
     print("  EXEMPLOS AVANÇADOS - SIMULADOR DE REDE DE FILAS")
     print("="*70)
@@ -247,7 +326,7 @@ if __name__ == "__main__":
     exemplo_testes_carga()
     exemplo_impacto_capacidade()
     exemplo_impacto_servidores()
-    exemplo_validacao_tandem_100k_aleatorios()
+    exemplo_professor_itens_2_e_3()
     
     print("\n" + "="*70)
     print("  FIM DOS EXEMPLOS")
