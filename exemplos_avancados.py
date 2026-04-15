@@ -204,6 +204,37 @@ def exemplo_impacto_servidores():
         print(f"  % Tempo Ocioso: {fila.tempo_no_estado[0] / rede.tempo_atual * 100:.2f}%")
 
 
+def exemplo_validacao_tandem_100k_aleatorios():
+    """Validação solicitada: tandem G/G/2/3 -> G/G/1/5 com 100.000 aleatórios."""
+    print("\n" + "="*70)
+    print("EXEMPLO 8: Validação Tandem com 100.000 Aleatórios")
+    print("="*70)
+
+    rede = SimuladorRede()
+
+    # Fila 1: G/G/2/3 com chegada externa entre 1 e 4.
+    rede.adicionar_fila("Fila1", servidores=2, capacidade=3,
+                       tempo_chegada_min=1.0, tempo_chegada_max=4.0,
+                       tempo_atendimento_min=3.0, tempo_atendimento_max=4.0)
+
+    # Fila 2: G/G/1/5 sem chegada externa (apenas fluxo interno da Fila1).
+    rede.adicionar_fila("Fila2", servidores=1, capacidade=5,
+                       tempo_chegada_min=-1, tempo_chegada_max=-1,
+                       tempo_atendimento_min=2.0, tempo_atendimento_max=3.0)
+
+    # Tandem: 100% dos clientes que saem da Fila1 seguem para a Fila2.
+    rede.adicionar_rota("Fila1", "Fila2", 1.0)
+
+    rede.executar(
+        tempo_simulacao=10**9,
+        max_aleatorios=100000,
+        tempo_primeira_chegada=1.5,
+    )
+    rede.imprimir_relatorio(
+        "VALIDACAO: Fila1 G/G/2/3 -> Fila2 G/G/1/5 (100.000 aleatorios)"
+    )
+
+
 if __name__ == "__main__":
     print("\n" + "="*70)
     print("  EXEMPLOS AVANÇADOS - SIMULADOR DE REDE DE FILAS")
@@ -216,6 +247,7 @@ if __name__ == "__main__":
     exemplo_testes_carga()
     exemplo_impacto_capacidade()
     exemplo_impacto_servidores()
+    exemplo_validacao_tandem_100k_aleatorios()
     
     print("\n" + "="*70)
     print("  FIM DOS EXEMPLOS")

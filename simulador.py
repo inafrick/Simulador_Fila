@@ -7,6 +7,10 @@ import heapq
 from typing import Dict, List, Tuple, Optional
 
 
+class LimiteAleatoriosAtingido(Exception):
+    """Sinaliza que o limite de aleatórios foi atingido durante a simulação."""
+
+
 class GeradorAleatorio:
     """Gerador de números pseudoaleatórios centralizado."""
     def __init__(self, semente=12345):
@@ -15,9 +19,20 @@ class GeradorAleatorio:
         self.c = 12345
         self.m = 2**31
         self.aleatorios_consumidos = 0
+        self.limite_aleatorios: Optional[int] = None
+
+    def definir_limite(self, limite: Optional[int]):
+        """Define limite de consumo de aleatórios (None para sem limite)."""
+        self.limite_aleatorios = limite
     
     def proximo(self) -> float:
         """Gera o próximo número pseudoaleatório entre 0 e 1."""
+        if (self.limite_aleatorios is not None and
+                self.aleatorios_consumidos >= self.limite_aleatorios):
+            raise LimiteAleatoriosAtingido(
+                f"Limite de {self.limite_aleatorios} aleatórios atingido"
+            )
+
         self.semente = (self.a * self.semente + self.c) % self.m
         self.aleatorios_consumidos += 1
         return self.semente / self.m
@@ -182,27 +197,47 @@ class SimuladorRede:
                 self.agendar_evento(tempo + tempo_atendimento, "SAIDA",
                                   {"fila": nome_fila})
     
-    def executar(self, tempo_simulacao: float = 10000.0):
-        """Executa a simulação."""
+    def executar(self, tempo_simulacao: float = 10000.0,
+                 max_aleatorios: Optional[int] = None,
+                 tempo_primeira_chegada: float = 2.0):
+        """Executa a simulação.
+
+        Args:
+            tempo_simulacao: tempo limite de simulação (min)
+            max_aleatorios: limita consumo de aleatórios (None = sem limite)
+            tempo_primeira_chegada: instante da primeira chegada externa
+        """
         self.tempo_final = tempo_simulacao
+        self.gerador.definir_limite(max_aleatorios)
+        self.eventos = []
+        self.tempo_atual = 0.0
         
         # Agenda primeira chegada em cada fila com entrada externa
         for nome, fila in self.filas.items():
             if fila.tempo_chegada_min >=0:  # Tem entrada externa
-                self.agendar_evento(2.0, "CHEGADA_EXTERNA", {"fila": nome})
+                self.agendar_evento(tempo_primeira_chegada, "CHEGADA_EXTERNA", {"fila": nome})
         
         # Processa eventos
-        eventos_processados = 0
         while self.eventos and self.tempo_atual < self.tempo_final:
             tempo, tipo, dados = heapq.heappop(self.eventos)
-            eventos_processados += 1
-            
-            if tipo == "CHEGADA_EXTERNA":
-                self.processar_chegada_externa(tempo, dados["fila"])
-            elif tipo == "CHEGADA_INTERNA":
-                self.processar_chegada_interna(tempo, dados["fila"])
-            elif tipo == "SAIDA":
-                self.processar_saida(tempo, dados["fila"])
+
+            if tempo > self.tempo_final:
+                self.tempo_atual = self.tempo_final
+                break
+
+            try:
+                if tipo == "CHEGADA_EXTERNA":
+                    self.processar_chegada_externa(tempo, dados["fila"])
+                elif tipo == "CHEGADA_INTERNA":
+                    self.processar_chegada_interna(tempo, dados["fila"])
+                elif tipo == "SAIDA":
+                    self.processar_saida(tempo, dados["fila"])
+            except LimiteAleatoriosAtingido:
+                break
+
+        # Sincroniza estatísticas de todas as filas no tempo global final.
+        for fila in self.filas.values():
+            fila.atualizar_estatisticas(self.tempo_atual)
     
     def imprimir_relatorio(self, titulo: str = "Relatório de Simulação"):
         """Gera relatório da simulação."""
