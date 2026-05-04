@@ -1,35 +1,55 @@
 """
 Simulador de Rede de Filas — Métodos Analíticos
 ================================================
-Suporta topologia genérica de rede de filas com roteamento probabilístico.
+Suporta topologia genérica de rede de filas com roteamento probabilístico,
+incluindo feedback (ciclos) entre filas e capacidade infinita.
 
 Uso:
   python simulador.py                     # Executa cenários programados
-  python simulador.py config_tandem.yml   # Carrega rede a partir de arquivo YAML
+  python simulador.py config_rede.yml     # Carrega rede a partir de arquivo YAML
 
-Formato do arquivo YAML:
-  aleatorios: 100000
+Formato do arquivo YAML (exemplo: rede com 3 filas e feedback):
+
+  a: 1103515245               # multiplicador do LCG
+  c: 12345                    # incremento do LCG
+  M: 2147483648                # módulo do LCG (2^31)
   semente: 12345
+  aleatorios: 100000
+
   primeira_chegada:
-    fila: Fila1
-    tempo: 1.5
+    fila: F1
+    tempo: 2.0
+
   filas:
-    Fila1:
+    F1:
+      servidores: 1            # G/G/1 (capacidade omitida = infinita)
+      chegada: [2, 4]
+      atendimento: [1, 2]
+    F2:
       servidores: 2
-      capacidade: 3
-      chegada: [1, 4]
-      atendimento: [3, 4]
-    Fila2:
-      servidores: 1
-      capacidade: 5
-      atendimento: [2, 3]
+      capacidade: 5            # G/G/2/5
+      atendimento: [4, 6]
+    F3:
+      servidores: 2
+      capacidade: 10           # G/G/2/10
+      atendimento: [5, 15]
+
   roteamento:
-    Fila1:
-      Fila2: 1.0
+    F1:
+      F2: 0.8
+      F3: 0.2
+    F2:
+      F1: 0.3                  # feedback
+      F3: 0.5
+                               # 0.2 restante → sai do sistema
+    F3:
+      F2: 0.7                  # feedback
+                               # 0.3 restante → sai do sistema
 """
 
 import heapq
 import sys
+from collections import defaultdict
 
 
 class Fila:
@@ -39,7 +59,7 @@ class Fila:
                  ch_min=None, ch_max=None):
         self.nome = nome
         self.servidores = servidores
-        self.capacidade = capacidade
+        self.capacidade = capacidade  # None → capacidade infinita
         self.sa_min = sa_min
         self.sa_max = sa_max
         self.ch_min = ch_min   # None → sem chegadas externas
@@ -47,25 +67,27 @@ class Fila:
 
         # Estado
         self.status = 0
-        self.tempos_acumulados = [0.0] * (capacidade + 1)
+        self.tempos_acumulados = defaultdict(float)
         self.perdas = 0
+        self.max_status = 0    # maior estado observado (para relatório)
 
 
 class SimuladorRede:
     """Simulador de rede de filas com topologia e roteamento configuráveis."""
 
-    def __init__(self, semente=12345, limite_aleatorios=100000):
+    def __init__(self, semente=12345, limite_aleatorios=100000,
+                 rng_a=1103515245, rng_c=12345, rng_m=2**31):
         self.filas = {}
         self.roteamento = {}
         self.escalonador = []
         self._seq = 0
         self.tempo_global = 0.0
 
-        # LCG (glibc / GCC)
+        # Gerador Congruencial Linear (configurável)
         self.semente = semente
-        self.a = 1103515245
-        self.c = 12345
-        self.m = 2 ** 31
+        self.a = rng_a
+        self.c = rng_c
+        self.m = rng_m
         self.aleatorios_consumidos = 0
         self.limite_aleatorios = limite_aleatorios
         self.simulacao_ativa = True
@@ -124,13 +146,25 @@ class SimuladorRede:
 
     # ── Eventos ──────────────────────────────────────────────
 
+    def _tem_vaga(self, fila):
+        """Verifica se a fila tem vaga (capacidade None = infinita)."""
+        if fila.capacidade is None:
+            return True
+        return fila.status < fila.capacidade
+
+    def _registrar_status(self, fila):
+        """Atualiza o maior estado observado."""
+        if fila.status > fila.max_status:
+            fila.max_status = fila.status
+
     def chegada(self, fila_nome, tempo_evento):
         """Chegada externa de um cliente na fila."""
         fila = self.filas[fila_nome]
         self._atualizar_tempos(tempo_evento)
 
-        if fila.status < fila.capacidade:
+        if self._tem_vaga(fila):
             fila.status += 1
+            self._registrar_status(fila)
             if fila.status <= fila.servidores:
                 ts = self.gerar_tempo(fila.sa_min, fila.sa_max)
                 if self.simulacao_ativa:
@@ -164,8 +198,9 @@ class SimuladorRede:
     def _chegada_interna(self, fila_nome):
         """Chegada de cliente vindo de outra fila (mesmo instante)."""
         fila = self.filas[fila_nome]
-        if fila.status < fila.capacidade:
+        if self._tem_vaga(fila):
             fila.status += 1
+            self._registrar_status(fila)
             if fila.status <= fila.servidores:
                 ts = self.gerar_tempo(fila.sa_min, fila.sa_max)
                 if self.simulacao_ativa:
@@ -183,12 +218,7 @@ class SimuladorRede:
         if not destinos:
             return
 
-        # Determinístico (destino único com probabilidade = 1.0)
-        if len(destinos) == 1 and destinos[0][1] >= 1.0:
-            self._chegada_interna(destinos[0][0])
-            return
-
-        # Probabilístico — consome um número aleatório
+        # Sempre consome um número aleatório para o roteamento
         r = self.next_random()
         if not self.simulacao_ativa:
             return
@@ -205,7 +235,7 @@ class SimuladorRede:
     def executar(self, chegadas_iniciais):
         """
         chegadas_iniciais: lista de tuplas (tempo, fila_nome).
-        Ex.: [(1.5, "Fila1")]
+        Ex.: [(2.0, "F1")]
         """
         for tempo, fila_nome in chegadas_iniciais:
             self.agendar_evento(tempo, "CHEGADA", fila_nome)
@@ -230,13 +260,16 @@ class SimuladorRede:
         for fila in self.filas.values():
             ch_info = (f"chegadas [{fila.ch_min}..{fila.ch_max}]"
                        if fila.ch_min is not None else "sem chegada externa")
-            print(f"\n  --- {fila.nome}: G/G/{fila.servidores}/{fila.capacidade}"
+            cap_str = fila.capacidade if fila.capacidade is not None else "∞"
+            print(f"\n  --- {fila.nome}: G/G/{fila.servidores}/{cap_str}"
                   f" | {ch_info}"
                   f" | atend [{fila.sa_min}..{fila.sa_max}] ---")
             print(f"  Perdas: {fila.perdas}")
             print(f"\n  {'Estado':<10} {'Tempo':>14} {'Probabilidade':>14}")
             print(f"  {'-'*10} {'-'*14} {'-'*14}")
-            for i in range(fila.capacidade + 1):
+            max_estado = (fila.capacidade if fila.capacidade is not None
+                          else fila.max_status)
+            for i in range(max_estado + 1):
                 t = fila.tempos_acumulados[i]
                 p = (t / self.tempo_global * 100) if self.tempo_global > 0 else 0
                 print(f"  {i:<10} {t:>14.4f} {p:>13.2f}%")
@@ -258,14 +291,17 @@ class SimuladorRede:
             cfg = yaml.safe_load(f)
 
         sim = cls(semente=cfg.get("semente", 12345),
-                  limite_aleatorios=cfg.get("aleatorios", 100000))
+                  limite_aleatorios=cfg.get("aleatorios", 100000),
+                  rng_a=cfg.get("a", 1103515245),
+                  rng_c=cfg.get("c", 12345),
+                  rng_m=cfg.get("M", 2**31))
 
         for nome, p in cfg["filas"].items():
             ch = p.get("chegada")
             sim.adicionar_fila(
                 nome=nome,
                 servidores=p["servidores"],
-                capacidade=p["capacidade"],
+                capacidade=p.get("capacidade"),  # None → infinita
                 sa_min=p["atendimento"][0],
                 sa_max=p["atendimento"][1],
                 ch_min=ch[0] if ch else None,
@@ -293,30 +329,24 @@ if __name__ == "__main__":
         sim.imprimir_relatorio()
         sys.exit(0)
 
-    # ── Cenário 1: Fila única G/G/1/5 ──
-    sim1 = SimuladorRede()
-    sim1.adicionar_fila("F1", servidores=1, capacidade=5,
-                        ch_min=2.0, ch_max=5.0, sa_min=3.0, sa_max=5.0)
-    sim1.executar([(2.0, "F1")])
-    sim1.imprimir_relatorio("G/G/1/5 — chegadas [2..5], atendimento [3..5]")
-
-    # ── Cenário 2: Fila única G/G/2/5 ──
-    sim2 = SimuladorRede()
-    sim2.adicionar_fila("F1", servidores=2, capacidade=5,
-                        ch_min=2.0, ch_max=5.0, sa_min=3.0, sa_max=5.0)
-    sim2.executar([(2.0, "F1")])
-    sim2.imprimir_relatorio("G/G/2/5 — chegadas [2..5], atendimento [3..5]")
-
-    # ── Cenário 3: Rede Tandem (Validação) ──
-    # Fila 1 — G/G/2/3, chegadas 1..4, atendimento 3..4
-    # Fila 2 — G/G/1/5, atendimento 2..3 (sem chegada externa)
-    # Roteamento: 100% Fila1 → Fila2
-    # Primeiro cliente chega em t = 1.5, filas inicialmente vazias
-    sim3 = SimuladorRede()
-    sim3.adicionar_fila("Fila1", servidores=2, capacidade=3,
-                        ch_min=1.0, ch_max=4.0, sa_min=3.0, sa_max=4.0)
-    sim3.adicionar_fila("Fila2", servidores=1, capacidade=5,
-                        sa_min=2.0, sa_max=3.0)
-    sim3.definir_roteamento("Fila1", [("Fila2", 1.0)])
-    sim3.executar([(1.5, "Fila1")])
-    sim3.imprimir_relatorio("Rede Tandem: Fila1 (G/G/2/3) → Fila2 (G/G/1/5)")
+    # ── Cenário de Validação: Rede Genérica com Feedback ──
+    # Fila 1 — G/G/1 (capacidade infinita), chegadas 2..4, atendimento 1..2
+    # Fila 2 — G/G/2/5, atendimento 4..6 (sem chegada externa)
+    # Fila 3 — G/G/2/10, atendimento 5..15 (sem chegada externa)
+    # Roteamento:
+    #   F1 → 0.8 F2, 0.2 F3
+    #   F2 → 0.3 F1, 0.5 F3, 0.2 sai do sistema
+    #   F3 → 0.7 F2, 0.3 sai do sistema
+    # Filas inicialmente vazias, primeiro cliente chega em t = 2.0
+    sim = SimuladorRede()
+    sim.adicionar_fila("F1", servidores=1, capacidade=None,
+                       ch_min=2.0, ch_max=4.0, sa_min=1.0, sa_max=2.0)
+    sim.adicionar_fila("F2", servidores=2, capacidade=5,
+                       sa_min=4.0, sa_max=6.0)
+    sim.adicionar_fila("F3", servidores=2, capacidade=10,
+                       sa_min=5.0, sa_max=15.0)
+    sim.definir_roteamento("F1", [("F2", 0.8), ("F3", 0.2)])
+    sim.definir_roteamento("F2", [("F1", 0.3), ("F3", 0.5)])
+    sim.definir_roteamento("F3", [("F2", 0.7)])
+    sim.executar([(2.0, "F1")])
+    sim.imprimir_relatorio("Rede: F1(G/G/1) → F2(G/G/2/5) ↔ F3(G/G/2/10)")

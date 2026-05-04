@@ -1,0 +1,50 @@
+# =============================================
+# Rede de Filas Genérica — Validação
+# =============================================
+# Topologia:
+#   F1 (G/G/1, capacidade infinita) → 80% F2, 20% F3
+#   F2 (G/G/2/5) → 30% F1, 50% F3, 20% sai do sistema
+#   F3 (G/G/2/10) → 70% F2, 30% sai do sistema
+#
+# Chegadas externas somente na F1 (2..4 min).
+# Filas inicialmente vazias, primeiro cliente chega em t = 2.0.
+# Simulação encerra ao consumir 100.000 números aleatórios.
+
+# Gerador Congruencial Linear (LCG)
+a: 1103515245
+c: 12345
+M: 2147483648     # 2^31
+
+aleatorios: 100000
+semente: 12345
+
+primeira_chegada:
+  fila: F1
+  tempo: 2.0
+
+filas:
+  F1:
+    servidores: 1
+    # capacidade omitida = infinita
+    chegada: [2, 4]
+    atendimento: [1, 2]
+
+  F2:
+    servidores: 2
+    capacidade: 5
+    atendimento: [4, 6]
+
+  F3:
+    servidores: 2
+    capacidade: 10
+    atendimento: [5, 15]
+
+roteamento:
+  F1:
+    F2: 0.8
+    F3: 0.2
+  F2:
+    F1: 0.3
+    F3: 0.5
+  F3:
+    F2: 0.7
