@@ -1,0 +1,30 @@
+# =============================================
+# Rede de Filas em Tandem — Arquivo de Configuração
+# =============================================
+# Fila1 (G/G/2/3) → Fila2 (G/G/1/5)
+# Clientes chegam do exterior somente na Fila1.
+# 100% dos clientes atendidos na Fila1 vão para Fila2.
+# Após atendimento na Fila2, saem do sistema.
+
+aleatorios: 100000
+semente: 12345
+
+primeira_chegada:
+  fila: Fila1
+  tempo: 1.5
+
+filas:
+  Fila1:
+    servidores: 2
+    capacidade: 3
+    chegada: [1, 4]
+    atendimento: [3, 4]
+
+  Fila2:
+    servidores: 1
+    capacidade: 5
+    atendimento: [2, 3]
+
+roteamento:
+  Fila1:
+    Fila2: 1.0
