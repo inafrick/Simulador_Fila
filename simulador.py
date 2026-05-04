@@ -281,7 +281,7 @@ class SimuladorRede:
 
 
 # ==========================================
-# EXEMPLOS DE USO E CENÁRIOS
+# EXECUÇÃO DOS CENÁRIOS
 # ==========================================
 
 if __name__ == "__main__":
