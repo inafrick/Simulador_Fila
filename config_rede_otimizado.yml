@@ -1,10 +1,10 @@
 # =============================================
-# Rede de Filas Genérica — Validação
+# Rede de Filas Genérica — Validação (Otimizada)
 # =============================================
 # Topologia:
 #   F1 (G/G/2/5) → 100% F2
-#   F2 (G/G/1/4) → 20% F1, 70% F3, 10% sai do sistema
-#   F3 (G/G/3/inf) → 100% sai do sistema
+#   F2 (G/G/3/10) → 20% F1, 70% F3, 10% sai do sistema
+#   F3 (G/G/1/inf) → 100% sai do sistema
 #
 # Chegadas externas somente na F1 (1.0..5.0 min).
 # Filas inicialmente vazias, primeiro cliente chega em t = 2.0.
@@ -26,17 +26,16 @@ filas:
   F1:
     servidores: 2
     capacidade: 5
-    # capacidade omitida = infinita
     chegada: [1.0, 5.0]
     atendimento: [2.0, 4.0]
 
   F2:
-    servidores: 1
-    capacidade: 4
+    servidores: 3       # mudou de 1 para 3
+    capacidade: 10      # mudou de 4 para 10
     atendimento: [5.0, 10.0]
 
   F3:
-    servidores: 3
+    servidores: 1       # mudou de 3 para 1
     # capacidade omitida = infinita
     atendimento: [1.0, 3.0]
 

@@ -3,48 +3,6 @@ Simulador de Rede de Filas — Métodos Analíticos
 ================================================
 Suporta topologia genérica de rede de filas com roteamento probabilístico,
 incluindo feedback (ciclos) entre filas e capacidade infinita.
-
-Uso:
-  python simulador.py                     # Executa cenários programados
-  python simulador.py config_rede.yml     # Carrega rede a partir de arquivo YAML
-
-Formato do arquivo YAML (exemplo: rede com 3 filas e feedback):
-
-  a: 1103515245               # multiplicador do LCG
-  c: 12345                    # incremento do LCG
-  M: 2147483648                # módulo do LCG (2^31)
-  semente: 12345
-  aleatorios: 100000
-
-  primeira_chegada:
-    fila: F1
-    tempo: 2.0
-
-  filas:
-    F1:
-      servidores: 1            # G/G/1 (capacidade omitida = infinita)
-      chegada: [2, 4]
-      atendimento: [1, 2]
-    F2:
-      servidores: 2
-      capacidade: 5            # G/G/2/5
-      atendimento: [4, 6]
-    F3:
-      servidores: 2
-      capacidade: 10           # G/G/2/10
-      atendimento: [5, 15]
-
-  roteamento:
-    F1:
-      F2: 0.8
-      F3: 0.2
-    F2:
-      F1: 0.3                  # feedback
-      F3: 0.5
-                               # 0.2 restante → sai do sistema
-    F3:
-      F2: 0.7                  # feedback
-                               # 0.3 restante → sai do sistema
 """
 
 import heapq
@@ -101,13 +59,7 @@ class SimuladorRede:
                                 sa_min, sa_max, ch_min, ch_max)
 
     def definir_roteamento(self, origem, destinos):
-        """
-        Define o roteamento de saída de uma fila.
-        destinos: lista de tuplas (fila_destino, probabilidade).
-        Ex.: [("F2", 1.0)]          → 100% para F2
-             [("F2", 0.8), ("F3", 0.2)] → 80% F2, 20% F3
-        Se soma das probabilidades < 1.0, o restante sai do sistema.
-        """
+        """Define o roteamento de saída de uma fila."""
         self.roteamento[origem] = destinos
 
     # ── Gerador de Números Pseudoaleatórios ──────────────────
@@ -147,18 +99,15 @@ class SimuladorRede:
     # ── Eventos ──────────────────────────────────────────────
 
     def _tem_vaga(self, fila):
-        """Verifica se a fila tem vaga (capacidade None = infinita)."""
         if fila.capacidade is None:
             return True
         return fila.status < fila.capacidade
 
     def _registrar_status(self, fila):
-        """Atualiza o maior estado observado."""
         if fila.status > fila.max_status:
             fila.max_status = fila.status
 
     def chegada(self, fila_nome, tempo_evento):
-        """Chegada externa de um cliente na fila."""
         fila = self.filas[fila_nome]
         self._atualizar_tempos(tempo_evento)
 
@@ -173,7 +122,6 @@ class SimuladorRede:
         else:
             fila.perdas += 1
 
-        # Próxima chegada externa (somente se a fila recebe do exterior)
         if fila.ch_min is not None:
             tc = self.gerar_tempo(fila.ch_min, fila.ch_max)
             if self.simulacao_ativa:
@@ -181,7 +129,6 @@ class SimuladorRede:
                                    "CHEGADA", fila_nome)
 
     def saida(self, fila_nome, tempo_evento):
-        """Fim de atendimento — cliente sai da fila."""
         fila = self.filas[fila_nome]
         self._atualizar_tempos(tempo_evento)
 
@@ -196,7 +143,6 @@ class SimuladorRede:
         self._rotear_cliente(fila_nome)
 
     def _chegada_interna(self, fila_nome):
-        """Chegada de cliente vindo de outra fila (mesmo instante)."""
         fila = self.filas[fila_nome]
         if self._tem_vaga(fila):
             fila.status += 1
@@ -210,15 +156,13 @@ class SimuladorRede:
             fila.perdas += 1
 
     def _rotear_cliente(self, fila_origem):
-        """Encaminha o cliente conforme tabela de roteamento."""
         if fila_origem not in self.roteamento:
-            return  # cliente sai do sistema
+            return
 
         destinos = self.roteamento[fila_origem]
         if not destinos:
             return
 
-        # Sempre consome um número aleatório para o roteamento
         r = self.next_random()
         if not self.simulacao_ativa:
             return
@@ -228,15 +172,10 @@ class SimuladorRede:
             if r < acum:
                 self._chegada_interna(destino)
                 return
-        # r >= acum → cliente sai do sistema
 
     # ── Execução ─────────────────────────────────────────────
 
     def executar(self, chegadas_iniciais):
-        """
-        chegadas_iniciais: lista de tuplas (tempo, fila_nome).
-        Ex.: [(2.0, "F1")]
-        """
         for tempo, fila_nome in chegadas_iniciais:
             self.agendar_evento(tempo, "CHEGADA", fila_nome)
 
@@ -264,15 +203,36 @@ class SimuladorRede:
             print(f"\n  --- {fila.nome}: G/G/{fila.servidores}/{cap_str}"
                   f" | {ch_info}"
                   f" | atend [{fila.sa_min}..{fila.sa_max}] ---")
-            print(f"  Perdas: {fila.perdas}")
-            print(f"\n  {'Estado':<10} {'Tempo':>14} {'Probabilidade':>14}")
-            print(f"  {'-'*10} {'-'*14} {'-'*14}")
-            max_estado = (fila.capacidade if fila.capacidade is not None
-                          else fila.max_status)
+            print(f"  Perdas de clientes: {fila.perdas}")
+            
+            # Cabeçalho da tabela ajustado para ficar parecido com seu exemplo
+            max_estado = fila.max_status if fila.capacidade is None else fila.max_status
+            
+            L = 0.0
+            servidores_ocupados = 0.0
+
             for i in range(max_estado + 1):
                 t = fila.tempos_acumulados[i]
-                p = (t / self.tempo_global * 100) if self.tempo_global > 0 else 0
-                print(f"  {i:<10} {t:>14.4f} {p:>13.2f}%")
+                p_prob = (t / self.tempo_global) if self.tempo_global > 0 else 0
+                print(f"  Estado {i}: tempo = {t:<12.4f} probabilidade = {p_prob*100:>7.4f}%")
+                
+                # Cálculos matemáticos dos índices
+                L += i * p_prob
+                servidores_ocupados += min(i, fila.servidores) * p_prob
+
+            # Cálculo de Vazão (Lambda/X) e Tempo de Resposta (W)
+            e_s = (fila.sa_min + fila.sa_max) / 2.0
+            mu = 1.0 / e_s if e_s > 0 else 0
+            
+            utilizacao = (servidores_ocupados / fila.servidores) if fila.servidores > 0 else 0
+            vazao = servidores_ocupados * mu
+            tempo_resposta = L / vazao if vazao > 0 else 0
+
+            # Imprime os cálculos
+            print(f"\n  • População (L): {L:.6f}")
+            print(f"  • Vazão (λ): {vazao:.6f}")
+            print(f"  • Utilização (ρ): {utilizacao:.6f}")
+            print(f"  • Tempo de Resposta (W): {tempo_resposta:.6f}")
 
         print(f"\n{linha}")
 
@@ -280,7 +240,6 @@ class SimuladorRede:
 
     @classmethod
     def carregar_yaml(cls, arquivo):
-        """Carrega configuração da rede a partir de arquivo YAML."""
         try:
             import yaml
         except ImportError:
@@ -301,7 +260,7 @@ class SimuladorRede:
             sim.adicionar_fila(
                 nome=nome,
                 servidores=p["servidores"],
-                capacidade=p.get("capacidade"),  # None → infinita
+                capacidade=p.get("capacidade"),
                 sa_min=p["atendimento"][0],
                 sa_max=p["atendimento"][1],
                 ch_min=ch[0] if ch else None,
@@ -316,37 +275,11 @@ class SimuladorRede:
         return sim, [(pc["tempo"], pc["fila"])]
 
 
-# ==========================================
-# EXECUÇÃO DOS CENÁRIOS
-# ==========================================
-
 if __name__ == "__main__":
-
-    # ── Modo arquivo YAML ──
     if len(sys.argv) > 1 and sys.argv[1].endswith((".yml", ".yaml")):
         sim, chegadas = SimuladorRede.carregar_yaml(sys.argv[1])
         sim.executar(chegadas)
         sim.imprimir_relatorio()
         sys.exit(0)
-
-    # ── Cenário de Validação: Rede Genérica com Feedback ──
-    # Fila 1 — G/G/1 (capacidade infinita), chegadas 2..4, atendimento 1..2
-    # Fila 2 — G/G/2/5, atendimento 4..6 (sem chegada externa)
-    # Fila 3 — G/G/2/10, atendimento 5..15 (sem chegada externa)
-    # Roteamento:
-    #   F1 → 0.8 F2, 0.2 F3
-    #   F2 → 0.3 F1, 0.5 F3, 0.2 sai do sistema
-    #   F3 → 0.7 F2, 0.3 sai do sistema
-    # Filas inicialmente vazias, primeiro cliente chega em t = 2.0
-    sim = SimuladorRede()
-    sim.adicionar_fila("F1", servidores=1, capacidade=None,
-                       ch_min=2.0, ch_max=4.0, sa_min=1.0, sa_max=2.0)
-    sim.adicionar_fila("F2", servidores=2, capacidade=5,
-                       sa_min=4.0, sa_max=6.0)
-    sim.adicionar_fila("F3", servidores=2, capacidade=10,
-                       sa_min=5.0, sa_max=15.0)
-    sim.definir_roteamento("F1", [("F2", 0.8), ("F3", 0.2)])
-    sim.definir_roteamento("F2", [("F1", 0.3), ("F3", 0.5)])
-    sim.definir_roteamento("F3", [("F2", 0.7)])
-    sim.executar([(2.0, "F1")])
-    sim.imprimir_relatorio("Rede: F1(G/G/1) → F2(G/G/2/5) ↔ F3(G/G/2/10)")
+    else:
+        print("Uso: python simulador.py arquivo.yml")
